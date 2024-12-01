@@ -254,18 +254,29 @@ for epoch in range(num_epochs):
         latent_fixed = tf.convert_to_tensor(latent_fixed, dtype=tf.float32)
         
         generated_images = generator(latent_fixed, training=False)
-        generated_images = (generated_images + 1.0) / 2.0  # [0,1] 범위로 변환
-        
+        generated_images = generated_images.numpy()  # [0, 1] 범위로 유지
+
+        # 시각화용: [0, 1] 범위를 그대로 사용
         fig, axes = plt.subplots(1, num_samples, figsize=(num_samples * 2, 2))
-        
         for img, ax in zip(generated_images, axes):
-            ax.imshow(img.numpy())
+            ax.imshow(img)  # [0, 1] 범위 사용
             ax.axis('off')
+
         # 이미지 시각화
-        if visualize == True:
+        if visualize:
             plt.show()
-        # 이미지 저장
-        if save == True:
-            save_path = os.path.join("generatedImage", f"generated_image_epoch{epoch+1}.png")
-            plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-            plt.close()  # 현재 figure를 닫아 메모리 절약
+
+        # 저장용: [0, 255] 범위로 변환
+        if save:
+            save_images = (generated_images * 255).astype(np.uint8)  # [0, 255]로 변환
+            # save_path = os.path.join("generatedImage", f"generated_image_epoch{epoch+1}.png")
+            
+                
+            for img_idx, img in enumerate(save_images):  # 각 이미지에 대해
+                # 채널 분리 (R, G, B)
+                for channel_idx, channel_name in enumerate(['R', 'G', 'B']):
+                    channel = img[:, :, channel_idx]  # (256, 128)
+                    save_path = os.path.join("generatedImage", f"generated_image_epoch{epoch+1}_{img_idx}_{channel_name}.png")
+                    plt.imsave(save_path, channel, cmap='gray')  # 흑백으로 저장
+                    print(f"Saved {channel_name} channel at: {save_path}")
+            plt.close(fig)  # 현재 figure 닫기
