@@ -51,7 +51,7 @@ num_classes = 2
 def createTfDataset():
     # TensorFlow 데이터셋 생성
     dataset = tf.data.Dataset.from_tensor_slices((file_paths, labels))
-    dataset = dataset = dataset.map(
+    dataset = dataset.map(
             lambda file_path, label: (
                 parse_and_process_file(file_path, nperseg, noverlap, original_shape),
                 tf.one_hot(label, depth=num_classes)  # 레이블을 원-핫 인코딩
@@ -64,7 +64,8 @@ def createTfDataset():
         )
 
         # Prefetch to improve performance
+    
     dataset = dataset.shuffle(buffer_size=buffer_size)
-    dataset = dataset.batch(batch_size)
+    dataset = dataset.batch(batch_size, drop_remainder=True)  # drop_remainder 적용
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset

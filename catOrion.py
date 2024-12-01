@@ -131,7 +131,7 @@ def build_discriminator(input_shape=(256, 128, 3), num_classes=2):
     # First Conv Block
     x = Conv2D(64, (3, 3), strides=(2, 2), padding='same')(inputs)
     x = BatchNormalization()(x)
-    x = LeakyReLU(0.1)(x)
+    x = LeakyReLU(0.1)(x)ㅅ
 
     # Second Conv Block
     x = Conv2D(128, (3, 3), strides=(2, 2), padding='same')(x)

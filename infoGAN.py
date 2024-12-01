@@ -14,12 +14,14 @@ image_height = 256
 image_width = 128
 channels = 3
 latent_dim = 100
-categorical_dim = 2  # 예: 10개의 범주
-continuous_dim = 0    # 예: 2개의 연속 변수
+categorical_dim = 2  # 예: 2개의 범주
+continuous_dim = 0    # 예: 0개의 연속 변수
 total_dim = latent_dim + categorical_dim + continuous_dim
 buffer_size = 1000
 num_epochs = 50
 sample_interval = 100
+lambda_info = 1.0  # InfoGAN의 상호 정보 손실 가중치
+
 
 # 데이터 디렉토리 설정 (이미지가 저장된 디렉토리 경로로 변경)
 data_dir = './data/images'  # 예: './data/images' 디렉토리에 이미지가 저장되어 있다고 가정
@@ -34,7 +36,7 @@ train_dataset = createTfDataset()
 # train_dataset = train_dataset.map(lambda x: normalization_layer(x))
 # train_dataset = train_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
-
+# 생성기 모델 정의
 def build_generator(input_dim, output_shape=(256, 128, 3)):
     model = models.Sequential(name="Generator")
     
@@ -43,64 +45,51 @@ def build_generator(input_dim, output_shape=(256, 128, 3)):
     model.add(layers.ReLU())
     
     model.add(layers.Reshape((8, 4, 256)))  # 시작 크기: (8, 4, 256)
-    assert model.output_shape == (None, 8, 4, 256)  # 배치 크기는 None
     
-    # Upsampling to (16, 8, 128)
+    # Upsampling 단계들
     model.add(layers.Conv2DTranspose(128, kernel_size=4, strides=2, padding='same', use_bias=False))
     model.add(layers.BatchNormalization())
     model.add(layers.ReLU())
-    assert model.output_shape == (None, 16, 8, 128)
     
-    # Upsampling to (32, 16, 64)
     model.add(layers.Conv2DTranspose(64, kernel_size=4, strides=2, padding='same', use_bias=False))
     model.add(layers.BatchNormalization())
     model.add(layers.ReLU())
-    assert model.output_shape == (None, 32, 16, 64)
     
-    # Upsampling to (64, 32, 32)
     model.add(layers.Conv2DTranspose(32, kernel_size=4, strides=2, padding='same', use_bias=False))
     model.add(layers.BatchNormalization())
     model.add(layers.ReLU())
-    assert model.output_shape == (None, 64, 32, 32)
     
-    # Upsampling to (128, 64, 16)
     model.add(layers.Conv2DTranspose(16, kernel_size=4, strides=2, padding='same', use_bias=False))
     model.add(layers.BatchNormalization())
     model.add(layers.ReLU())
-    assert model.output_shape == (None, 128, 64, 16)
     
-    # Upsampling to (256, 128, 3)
+    # 최종 출력 레이어
     model.add(layers.Conv2DTranspose(3, kernel_size=4, strides=2, padding='same', use_bias=False))
     model.add(layers.Activation('sigmoid'))  # 출력 범위: [0, 1]
-
-    assert model.output_shape == (None, 256, 128, 3)
     
     return model
 
-
-def build_discriminator_with_q(input_shape=(256, 128, 3), categorical_dim=10, continuous_dim=2):
+# 판별기 모델 정의
+def build_discriminator_with_q(input_shape=(256, 128, 3), categorical_dim=2, continuous_dim=0):
     input_img = layers.Input(shape=input_shape)
     
-    # Downsampling to (128, 64, 64)
+    # Downsampling 단계들
     x = layers.Conv2D(64, kernel_size=4, strides=2, padding='same')(input_img)
     x = layers.LeakyReLU(alpha=0.1)(x)
     
-    # Downsampling to (64, 32, 128)
     x = layers.Conv2D(128, kernel_size=4, strides=2, padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     
-    # Downsampling to (32, 16, 256)
     x = layers.Conv2D(256, kernel_size=4, strides=2, padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     
-    # Downsampling to (16, 8, 512)
     x = layers.Conv2D(512, kernel_size=4, strides=2, padding='same')(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     
-    # Flatten
+    # Flatten 및 특징 추출
     x = layers.Flatten()(x)
     features = layers.Dense(1024)(x)
     features = layers.BatchNormalization()(features)
@@ -109,36 +98,29 @@ def build_discriminator_with_q(input_shape=(256, 128, 3), categorical_dim=10, co
     # Discriminator 출력 (진짜/가짜)
     D_output = layers.Dense(2, activation='softmax', name='D_output')(features)
     
-    # Q-Network 출력
-    # 범주형 변수에 대한 로짓
+    # Q-Network 출력 (범주형 변수)
     q_logits = layers.Dense(categorical_dim, name='c_logits')(features)
     
-    # 연속 변수가 없으므로 s_mu와 s_var는 생략
-    # continuous_dim = 0인 경우
+    # 연속 변수 출력 (필요 시)
     if continuous_dim > 0:
-        # 연속 변수에 대한 평균
         q_mu = layers.Dense(continuous_dim, name='s_mu')(features)
-        
-        # 연속 변수에 대한 분산 (양수 유지)
         q_var = layers.Dense(continuous_dim, activation='softplus', name='s_var')(features)
-        
-        model = models.Model(inputs=input_img, outputs=[D_output, q_logits, q_mu, q_var], name='Discriminator_with_Q')
+        outputs = [D_output, q_logits, q_mu, q_var]
     else:
-        model = models.Model(inputs=input_img, outputs=[D_output, q_logits], name='Discriminator_with_Q')
+        outputs = [D_output, q_logits]
     
-    return model
+    return models.Model(inputs=input_img, outputs=outputs, name='Discriminator_with_Q')
 
-
-# 손실 함수
+# 손실 함수 정의
 cross_entropy = losses.CategoricalCrossentropy(from_logits=False)  # 소프트맥스 출력 사용
 categorical_cross_entropy = losses.CategoricalCrossentropy(from_logits=False)
 mse_loss = losses.MeanSquaredError()
 
 # 모델 초기화
 generator = build_generator(latent_dim + categorical_dim + continuous_dim)
-discriminator = build_discriminator_with_q(input_shape=(256, 128, 3) , categorical_dim =categorical_dim, continuous_dim = continuous_dim)
+discriminator = build_discriminator_with_q(input_shape=(256, 128, 3), categorical_dim=categorical_dim, continuous_dim=continuous_dim)
 
-# 최적화기
+# 최적화기 정의
 lr = 2e-4
 beta1 = 0.5
 beta2 = 0.999
@@ -146,86 +128,92 @@ beta2 = 0.999
 optimizer_G = optimizers.Adam(learning_rate=lr, beta_1=beta1, beta_2=beta2)
 optimizer_D = optimizers.Adam(learning_rate=lr, beta_1=beta1, beta_2=beta2)
 
-
 # 잠재 변수 샘플링 함수
 def sample_latent(batch_size):
     # 잠재 변수 z (정규 분포)
-    z = np.random.randn(batch_size, latent_dim)
+    z = tf.random.normal([batch_size, latent_dim])
     
     # 범주형 변수 c (One-hot)
-    c = np.random.randint(0, categorical_dim, batch_size)
-    c_onehot = np.zeros((batch_size, categorical_dim))
-    c_onehot[np.arange(batch_size), c] = 1
+    c = tf.random.uniform([batch_size], minval=0, maxval=categorical_dim, dtype=tf.int32)
+    c_onehot = tf.one_hot(c, depth=categorical_dim)
     
     # 연속 변수 s (연속 변수 없음)
     if continuous_dim > 0:
-        s = np.random.uniform(-1, 1, (batch_size, continuous_dim))
-        latent = np.concatenate([z, c_onehot, s], axis=1)
+        s = tf.random.uniform([batch_size, continuous_dim], minval=-1, maxval=1)
+        latent = tf.concat([z, c_onehot, s], axis=1)
     else:
-        latent = np.concatenate([z, c_onehot], axis=1)
+        latent = tf.concat([z, c_onehot], axis=1)
     
     return latent, c
 
 # 훈련 단계 정의
 # @tf.function
 def train_step(real_images):
-    batch_size_current = int(tf.shape(real_images)[0])
-    # batch_size_current = real_images[0].shape[0]
+    # 고정된 배치 크기 사용
+    batch_size_current = batch_size  # 정수로 고정
     
     # 잠재 변수 샘플링
     latent, c = sample_latent(batch_size_current)
     latent = tf.convert_to_tensor(latent, dtype=tf.float32)
     c_onehot = tf.one_hot(c, depth=categorical_dim)
-    # s = tf.convert_to_tensor(s, dtype=tf.float32)
     
     # 진짜와 가짜 레이블 (원-핫 인코딩)
     real_labels = tf.one_hot([0] * batch_size_current, depth=2)  # 진짜: [1, 0]
     fake_labels = tf.one_hot([1] * batch_size_current, depth=2)  # 가짜: [0, 1]
     
-    with tf.GradientTape(persistent=True) as tape:
+    # **1. 판별기 손실 (loss_D + lambda * loss_Q)**
+    with tf.GradientTape() as tape_D:
         # 진짜 이미지에 대한 Discriminator 출력
-        if continuous_dim >0:
-            D_real, _, _, _ = discriminator(real_images, training=True)
-        else:
-            D_real, _, = discriminator(real_images, training=True)
-
+        D_real_outputs = discriminator(real_images, training=True)
+        D_real = D_real_outputs[0]
         loss_real = cross_entropy(real_labels, D_real)
         
         # 가짜 이미지 생성
         fake_images = generator(latent, training=True)
         
         # 가짜 이미지에 대한 Discriminator 출력
-        if continuous_dim >0:
-            D_fake, q_logits_fake, q_mu_fake, q_var_fake = discriminator(fake_images, training=True)
-        else:
-            D_fake, q_logits_fake = discriminator(fake_images, training=True)
+        D_fake_outputs = discriminator(fake_images, training=True)
+        D_fake = D_fake_outputs[0]
         loss_fake = cross_entropy(fake_labels, D_fake)
         
         # 총 Discriminator 손실
         loss_D = loss_real + loss_fake
         
-        # Generator 손실 (Discriminator가 가짜 이미지를 진짜로 분류하도록 유도)
-        loss_G = cross_entropy(real_labels, D_fake)
-        
-        # Q-Network 손실
-        # 범주형 변수에 대한 손실
+        # Q-Network 손실 (mutual information)
+        q_logits_fake = D_fake_outputs[1]
         loss_c = categorical_cross_entropy(c_onehot, q_logits_fake)
         
-        # 연속 변수에 대한 손실 (MSE)
-        # loss_s = mse_loss(s, q_mu_fake)
+        if continuous_dim > 0:
+            q_mu_fake = D_fake_outputs[2]
+            q_var_fake = D_fake_outputs[3]
+            # 실제 연속 변수 s를 샘플링
+            s = tf.random.uniform([batch_size_current, continuous_dim], minval=-1, maxval=1)
+            loss_s = mse_loss(s, q_mu_fake)
+            loss_Q = loss_c + loss_s
+        else:
+            loss_Q = loss_c  # 연속 변수가 없을 경우
         
-        # loss_Q = loss_c + loss_s
-        loss_Q = loss_c
-        
-        # 총 Generator 손실
-        loss_G_total = loss_G + loss_Q  # 하이퍼파라미터 조정 가능
+        # 총 Discriminator 손실에 InfoGAN의 Q-Network 손실 추가
+        loss_D_total = loss_D + lambda_info * loss_Q
     
-    # Discriminator의 그래디언트 계산 및 적용
-    gradients_D = tape.gradient(loss_D, discriminator.trainable_variables)
+    # 판별기의 그래디언트 계산 및 적용
+    gradients_D = tape_D.gradient(loss_D_total, discriminator.trainable_variables)
     optimizer_D.apply_gradients(zip(gradients_D, discriminator.trainable_variables))
     
-    # Generator의 그래디언트 계산 및 적용
-    gradients_G = tape.gradient(loss_G_total, generator.trainable_variables)
+    # **2. 생성기 손실 (loss_G)**
+    with tf.GradientTape() as tape_G:
+        # 가짜 이미지 생성
+        fake_images = generator(latent, training=True)
+        
+        # 가짜 이미지에 대한 Discriminator 출력
+        D_fake_outputs = discriminator(fake_images, training=True)
+        D_fake = D_fake_outputs[0]
+        
+        # 생성기의 손실: Discriminator가 가짜 이미지를 진짜로 분류하도록 유도
+        loss_G = cross_entropy(real_labels, D_fake)
+    
+    # 생성기의 그래디언트 계산 및 적용
+    gradients_G = tape_G.gradient(loss_G, generator.trainable_variables)
     optimizer_G.apply_gradients(zip(gradients_G, generator.trainable_variables))
     
     return loss_D, loss_G, loss_Q
@@ -276,7 +264,7 @@ for epoch in range(num_epochs):
                 # 채널 분리 (R, G, B)
                 for channel_idx, channel_name in enumerate(['R', 'G', 'B']):
                     channel = img[:, :, channel_idx]  # (256, 128)
-                    save_path = os.path.join("generatedImage", f"generated_image_epoch{epoch+1}_{img_idx}_{channel_name}.png")
+                    save_path = os.path.join("generatedImage", f"generated_image_{img_idx}_{channel_name}.png")
                     plt.imsave(save_path, channel, cmap='gray')  # 흑백으로 저장
                     print(f"Saved {channel_name} channel at: {save_path}")
             plt.close(fig)  # 현재 figure 닫기
