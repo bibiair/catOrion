@@ -256,22 +256,16 @@ for epoch in range(num_epochs):
         generated_images = generator(latent_fixed, training=False)
         generated_images = (generated_images + 1.0) / 2.0  # [0,1] 범위로 변환
         
+        fig, axes = plt.subplots(1, num_samples, figsize=(num_samples * 2, 2))
+        
+        for img, ax in zip(generated_images, axes):
+            ax.imshow(img.numpy())
+            ax.axis('off')
+        # 이미지 시각화
         if visualize == True:
-            # 이미지 시각화
-            fig, axes = plt.subplots(1, num_samples, figsize=(num_samples * 2, 2))
-            
-            for img, ax in zip(generated_images, axes):
-                ax.imshow(img.numpy())
-                ax.axis('off')
             plt.show()
         # 이미지 저장
         if save == True:
-            for i, img in enumerate(generated_images):
-                # img_array = img.numpy()  # 텐서를 numpy 배열로 변환
-                # plt.imshow(img_array)
-                # plt.axis('off')
-
-                # 이미지 저장
-                save_path = os.path.join("generatedImage", f"generated_image_{i+1}.png")
-                plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-                plt.close()  # 현재 figure를 닫아 메모리 절약
+            save_path = os.path.join("generatedImage", f"generated_image_epoch{epoch+1}.png")
+            plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+            plt.close()  # 현재 figure를 닫아 메모리 절약
