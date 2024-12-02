@@ -7,7 +7,8 @@ import glob
 from tensorflow.keras.preprocessing import image_dataset_from_directory
 
 from makeDataset import createTfDataset
-
+import matplotlib
+matplotlib.use('TkAgg')  # 또는 'Agg', 'Qt5Agg' 등 GUI 지원 백엔드 선택
 # 하이퍼파라미터
 batch_size = 16
 image_height = 256
@@ -18,7 +19,7 @@ categorical_dim = 2  # 예: 2개의 범주
 continuous_dim = 0    # 예: 0개의 연속 변수
 total_dim = latent_dim + categorical_dim + continuous_dim
 buffer_size = 1000
-num_epochs = 50
+num_epochs = 500
 sample_interval = 100
 lambda_info = 1.0  # InfoGAN의 상호 정보 손실 가중치
 
@@ -35,6 +36,44 @@ train_dataset = createTfDataset()
 # normalization_layer = layers.Rescaling(1./127.5, offset=-1)
 # train_dataset = train_dataset.map(lambda x: normalization_layer(x))
 # train_dataset = train_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+
+
+# 원-핫 인코딩된 레이블에 따라 시각화
+def visualize_dataset_by_label(dataset, num_samples=8):
+    """
+    데이터셋을 원-핫 인코딩된 레이블별로 시각화.
+    Args:
+        dataset: tf.data.Dataset 객체
+        num_samples: 각 레이블별로 시각화할 샘플 수
+    """
+    label_dict = {}  # 레이블별 이미지 저장
+    for batch_images, batch_labels in dataset.take(1):  # 한 배치만 가져옴
+        batch_labels = batch_labels.numpy()  # 텐서를 numpy로 변환
+        batch_images = batch_images.numpy()  # 이미지를 numpy로 변환
+        
+        # 레이블별로 이미지 분류
+        for img, label in zip(batch_images, batch_labels):
+            label_tuple = tuple(label)  # numpy 배열은 딕셔너리 키로 사용 불가하므로 튜플로 변환
+            if label_tuple not in label_dict:
+                label_dict[label_tuple] = []
+            label_dict[label_tuple].append(img)
+    
+    # 시각화
+    for label, images in label_dict.items():
+        # 최대 num_samples만큼 시각화
+        images_to_show = images[:num_samples]
+        plt.figure(figsize=(15, 5))
+        for i, img in enumerate(images_to_show):
+            ax = plt.subplot(1, num_samples, i + 1)
+            plt.imshow((img * 0.5) + 0.5)  # [-1, 1] -> [0, 1]로 변환
+            plt.title(f"Label: {label}")
+            plt.axis("off")
+        plt.tight_layout()
+        plt.show(block=True)
+
+# 원-핫 인코딩된 레이블별로 시각화
+visualize_dataset_by_label(train_dataset, num_samples=8)
 
 # 생성기 모델 정의
 def build_generator(input_dim, output_shape=(256, 128, 3)):
@@ -147,7 +186,7 @@ def sample_latent(batch_size):
     return latent, c
 
 # 훈련 단계 정의
-# @tf.function
+@tf.function
 def train_step(real_images):
     # 고정된 배치 크기 사용
     batch_size_current = batch_size  # 정수로 고정
